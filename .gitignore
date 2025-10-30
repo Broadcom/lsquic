@@ -1,0 +1,14 @@
+bin/test_config.h
+tests/test_*
+tests/graph_cubic
+tests/mini_parse
+*.a
+*.o
+bin/*_server
+bin/*_client
+*.pem
+CMakeFiles
+CMakeCache.txt
+*.cmake
+Makefile
+lsquic_versions_to_string.c
