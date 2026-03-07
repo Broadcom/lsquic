@@ -377,9 +377,28 @@ apply_hp_immediately (struct enc_sess_iquic *enc_sess,
         unsigned packno_off, unsigned packno_len)
 {
     unsigned char mask[SAMPLE_SZ];
+    struct lsquic_conn *const lconn = enc_sess->esi_conn;
 
     hp->hp_gen_mask(enc_sess, hp, 1,
                     packet_out->po_enc_data + packno_off + 4, mask, SAMPLE_SZ);
+
+    if ((lconn->cn_flags & LSCONN_HW_OFFLOADED_TX) &&
+        (packet_out->po_header_type == HETY_SHORT))
+    {
+#ifdef DEBUG_QUIC_OFFLOAD
+        LSQ_WARN("skip apply_hp_immediately: packet_out->po_packno=%lu",
+                 packet_out->po_packno);
+#endif
+#ifndef NDEBUG
+    packet_out->po_lflags |= POL_HEADER_PROT;
+#endif
+        return;
+    }
+#ifdef DEBUG_QUIC_OFFLOAD
+    LSQ_WARN("apply_hp_immediately: packet_out->po_packno=%lu po_header_type=%d",
+             packet_out->po_packno,
+             packet_out->po_header_type);
+#endif
     apply_hp(enc_sess, hp, packet_out->po_enc_data, mask, packno_off,
                                                                 packno_len);
 #ifndef NDEBUG
@@ -393,6 +412,7 @@ flush_hp_batch (struct enc_sess_iquic *enc_sess)
 {
     unsigned i;
     unsigned char mask[HP_BATCH_SIZE][SAMPLE_SZ];
+    struct lsquic_conn *const lconn = enc_sess->esi_conn;
 
     enc_sess->esi_hp.hp_gen_mask(enc_sess, &enc_sess->esi_hp, 1,
                         (unsigned char *) enc_sess->esi_hp_batch_samples,
@@ -400,13 +420,29 @@ flush_hp_batch (struct enc_sess_iquic *enc_sess)
                         enc_sess->esi_hp_batch_idx * SAMPLE_SZ);
     for (i = 0; i < enc_sess->esi_hp_batch_idx; ++i)
     {
-        apply_hp(enc_sess, &enc_sess->esi_hp,
-            enc_sess->esi_hp_batch_packets[i]->po_enc_data,
-            mask[i],
-            enc_sess->esi_hp_batch_packno_off[i],
-            enc_sess->esi_hp_batch_packno_len[i]);
+        if ((lconn->cn_flags & LSCONN_HW_OFFLOADED_TX) &&
+            (enc_sess->esi_hp_batch_packets[i]->po_header_type == HETY_SHORT))
+        {
+#ifdef DEBUG_QUIC_OFFLOAD
+            LSQ_WARN("skip flush_hp_batch: packet_out->po_packno=%lu",
+                     enc_sess->esi_hp_batch_packets[i]->po_packno);
+#endif
+        }
+        else
+        {
+#ifdef DEBUG_QUIC_OFFLOAD
+            LSQ_WARN("flush_hp_batch: packet_out->po_packno=%lu po_header_type=%d",
+                     enc_sess->esi_hp_batch_packets[i]->po_packno,
+                     enc_sess->esi_hp_batch_packets[i]->po_header_type);
+#endif
+            apply_hp(enc_sess, &enc_sess->esi_hp,
+                     enc_sess->esi_hp_batch_packets[i]->po_enc_data,
+                     mask[i],
+                     enc_sess->esi_hp_batch_packno_off[i],
+                     enc_sess->esi_hp_batch_packno_len[i]);
+        }
 #ifndef NDEBUG
-            enc_sess->esi_hp_batch_packets[i]->po_lflags |= POL_HEADER_PROT;
+        enc_sess->esi_hp_batch_packets[i]->po_lflags |= POL_HEADER_PROT;
 #endif
     }
     enc_sess->esi_hp_batch_idx = 0;
@@ -2232,14 +2268,30 @@ iquic_esf_encrypt_packet (enc_session_t *enc_session_p,
         LSQ_DEBUG("seal: in (%u bytes): %s", packet_out->po_data_sz,
             HEXSTR(packet_out->po_data, packet_out->po_data_sz, s_str));
     }
-    if (!EVP_AEAD_CTX_seal(&crypto_ctx->yk_aead_ctx, dst + header_sz, &out_sz,
-                dst_sz - header_sz, nonce, crypto_ctx->yk_iv_sz, packet_out->po_data,
-                packet_out->po_data_sz, dst, header_sz))
+
+    if (((enc_level == ENC_LEV_APP) && (lconn->cn_flags & LSCONN_HW_OFFLOADED_TX)))
     {
-        LSQ_WARN("cannot seal packet #%"PRIu64": %s", packet_out->po_packno,
-            ERR_error_string(ERR_get_error(), errbuf));
-        goto err;
+        /* If HW offload is enabled, memcpy the plaintext data and let HW encrypt it. */
+        memcpy(dst + header_sz, packet_out->po_data, packet_out->po_data_sz);
+        memset(dst + header_sz + packet_out->po_data_sz, 0, 16);
+        out_sz = packet_out->po_data_sz + 16;
+        dst[0] &= ~QUIC_BIT; /* Clear the valid bit of the header type */
+#ifdef DEBUG_QUIC_OFFLOAD
+        LSQ_WARN("HW offload is enabled, memcpy the plaintext data and let HW encrypt it.");
+#endif
     }
+    else
+    {
+        if (!EVP_AEAD_CTX_seal(&crypto_ctx->yk_aead_ctx, dst + header_sz, &out_sz,
+                    dst_sz - header_sz, nonce, crypto_ctx->yk_iv_sz, packet_out->po_data,
+                    packet_out->po_data_sz, dst, header_sz))
+        {
+            LSQ_WARN("cannot seal packet #%"PRIu64": %s", packet_out->po_packno,
+                ERR_error_string(ERR_get_error(), errbuf));
+            goto err;
+        }
+    }
+
     assert(out_sz == dst_sz - header_sz);
 
 #ifndef NDEBUG
