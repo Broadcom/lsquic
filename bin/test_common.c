@@ -17,6 +17,8 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <netdb.h>
+#include <ifaddrs.h>
 #else
 #include <Windows.h>
 #include <WinSock2.h>
@@ -989,6 +991,60 @@ sport_init_server (struct service_port *sport, struct lsquic_engine *engine,
         close(sockfd);
         errno = saved_errno;
         return -1;
+    }
+
+    if (sport->if_name[0] == '\0')
+    {
+        /* Populate if_name based on ip addr */
+        struct ifaddrs *ifaddr, *ifa;
+        int family, s;
+        char host[NI_MAXHOST];
+
+        if (getifaddrs(&ifaddr) == -1)
+        {
+            perror("getifaddrs");
+        }
+        else
+        {
+            for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+            {
+                if (ifa->ifa_addr == NULL)
+                    continue;
+
+                family = ifa->ifa_addr->sa_family;
+                if (family == sport->sas.ss_family)
+                {
+                    s = getnameinfo(ifa->ifa_addr, (family == AF_INET) ?
+                                    sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6),
+                                    host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+                    if (s != 0)
+                    {
+                        LSQ_ERROR("getnameinfo() failed: %s", gai_strerror(s));
+                        continue;
+                    }
+                    if (family == AF_INET) {
+                        if (0 == memcmp(&((struct sockaddr_in *)&sport->sas)->sin_addr,
+                                        &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr,
+                                        sizeof(struct in_addr)))
+                        {
+                            strncpy(sport->if_name, ifa->ifa_name, IFNAMSIZ - 1);
+                            sport->if_name[IFNAMSIZ - 1] = '\0';
+                            break;
+                        }
+                    } else if (family == AF_INET6) {
+                        if (0 == memcmp(&((struct sockaddr_in6 *)&sport->sas)->sin6_addr,
+                                        &((struct sockaddr_in6 *)ifa->ifa_addr)->sin6_addr,
+                                        sizeof(struct in6_addr)))
+                        {
+                            strncpy(sport->if_name, ifa->ifa_name, IFNAMSIZ - 1);
+                            sport->if_name[IFNAMSIZ - 1] = '\0';
+                            break;
+                        }
+                    }
+                }
+            }
+            freeifaddrs(ifaddr);
+        }
     }
 #endif
 

@@ -13,6 +13,8 @@
 #include <sys/queue.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>  /* For ioctl and IFNAMSIZ */
+#include <net/if.h>     /* For ifreq */
 #include <inttypes.h>
 
 #ifndef WIN32
@@ -35,6 +37,7 @@
 #include "test_common.h"
 #include "test_cert.h"
 #include "prog.h"
+#include "http_offload.h"
 
 #if HAVE_REGEX
 #ifndef WIN32
@@ -307,6 +310,9 @@ struct server_ctx {
     unsigned                     n_current_conns;
     unsigned                     delay_resp_sec;
     uint64_t                     max_pacing_rate;
+    enum lsquic_offload_direction quic_offload_direction;
+    int                          bnxt_ioctl_sock_fd; /* Socket for ioctl calls */
+    int                          flush_offload_on_startup;
 };
 
 struct lsquic_conn_ctx {
@@ -352,6 +358,32 @@ http_server_on_new_conn (void *stream_if_ctx, lsquic_conn_t *conn)
 }
 
 
+void
+http_server_on_handshake_done_and_keys_dropped (lsquic_conn_t *conn)
+{
+    lsquic_conn_ctx_t *conn_h = lsquic_conn_get_ctx(conn);
+    if (!conn_h)
+    {
+        return;
+    }
+    struct server_ctx *server_ctx = conn_h->server_ctx;
+    if (!server_ctx)
+    {
+        return;
+    }
+    struct service_port *sport = TAILQ_LAST(&server_ctx->sports, sport_head);
+    if (!sport)
+    {
+        LSQ_ERROR("Cannot offload: could not get service port for connection.");
+        return;
+    }
+    http_offload_add_flow(conn,
+                          server_ctx->bnxt_ioctl_sock_fd,
+                          sport->if_name,
+                          server_ctx->quic_offload_direction);
+}
+
+
 static void
 http_server_on_goaway (lsquic_conn_t *conn)
 {
@@ -367,6 +399,17 @@ http_server_on_conn_closed (lsquic_conn_t *conn)
     static int stopped;
     lsquic_conn_ctx_t *conn_h = lsquic_conn_get_ctx(conn);
     LSQ_INFO("Connection closed");
+
+    struct service_port *sport = TAILQ_LAST(&conn_h->server_ctx->sports, sport_head);
+    if (!sport)
+    {
+        LSQ_ERROR("Cannot offload: could not get service port for connection.");
+        return;
+    }
+    http_offload_delete_flow(conn,
+                             conn_h->server_ctx->bnxt_ioctl_sock_fd,
+                             sport->if_name);
+
     --conn_h->server_ctx->n_current_conns;
     if ((conn_h->server_ctx->prog->prog_flags & PROG_FLAG_COOLDOWN)
                                 && 0 == conn_h->server_ctx->n_current_conns)
@@ -1086,6 +1129,7 @@ const struct lsquic_stream_if http_server_if = {
     .on_write               = http_server_on_write,
     .on_close               = http_server_on_close,
     .on_goaway_received     = http_server_on_goaway,
+    .on_handshake_done_and_keys_dropped = http_server_on_handshake_done_and_keys_dropped,
 };
 
 
@@ -1202,6 +1246,7 @@ const struct lsquic_stream_if hq_server_if = {
     .on_read                = hq_server_on_read,
     .on_write               = hq_server_on_write,
     .on_close               = http_server_on_close,
+    .on_handshake_done_and_keys_dropped = http_server_on_handshake_done_and_keys_dropped,
 };
 #endif
 
@@ -1771,6 +1816,7 @@ const struct lsquic_stream_if interop_http_server_if = {
     .on_read                = http_server_interop_on_read,
     .on_write               = http_server_interop_on_write,
     .on_close               = http_server_on_close,
+    .on_handshake_done_and_keys_dropped = http_server_on_handshake_done_and_keys_dropped,
 };
 #endif /* HAVE_REGEX */
 
@@ -1800,6 +1846,10 @@ usage (const char *prog)
 "   -x RATE     Maximum pacing rate in bytes per second (throttle bandwidth)\n"
 "   -Y DELAY    Delay response for this many seconds -- use for debugging\n"
 "   -Q ALPN     Use hq mode; ALPN could be \"hq-29\", for example.\n"
+#ifdef HAVE_BNXT_EN_DRIVER
+"   -F           Flush all QUIC offload flows on startup (cleans up leaked flows)\n"
+"   -O DIRECTION QUIC offload direction\n"
+#endif
             , prog);
 }
 
@@ -1969,6 +2019,9 @@ main (int argc, char **argv)
                                             &http_server_if, &server_ctx);
 
     while (-1 != (opt = getopt(argc, argv, PROG_OPTS "y:Y:n:p:r:w:P:x:h"
+#ifdef HAVE_BNXT_EN_DRIVER
+                                                    "O:F"
+#endif
 #if HAVE_OPEN_MEMSTREAM
                                                     "Q:"
 #endif
@@ -2026,11 +2079,43 @@ main (int argc, char **argv)
             add_alpn(optarg);
             break;
 #endif
+#ifdef HAVE_BNXT_EN_DRIVER
+        case 'F':
+            server_ctx.flush_offload_on_startup = 1;
+            LSQ_INFO("Will flush all QUIC offload flows on startup");
+            break;
+        case 'O':   /* QUIC offload direction */
+            if (0 == strcasecmp(optarg, "tx"))
+                server_ctx.quic_offload_direction = LSQUIC_OFFLOAD_TX;
+            else if (0 == strcasecmp(optarg, "rx"))
+                server_ctx.quic_offload_direction = LSQUIC_OFFLOAD_RX;
+            else if (0 == strcasecmp(optarg, "all"))
+                server_ctx.quic_offload_direction = LSQUIC_OFFLOAD_ALL;
+            else if (0 == strcasecmp(optarg, "none"))
+                server_ctx.quic_offload_direction = LSQUIC_OFFLOAD_NONE;
+            else
+            {
+                LSQ_ERROR("Invalid offload direction: %s. Expected tx, rx, all, or none.", optarg);
+                exit(EXIT_FAILURE);
+            }
+            LSQ_INFO("QUIC offload direction set to %s (%d)", optarg, server_ctx.quic_offload_direction);
+            break;
+#endif
         default:
             if (0 != prog_set_opt(&prog, opt, optarg))
                 exit(1);
         }
     }
+
+#ifdef HAVE_BNXT_EN_DRIVER
+    server_ctx.bnxt_ioctl_sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (server_ctx.bnxt_ioctl_sock_fd < 0) {
+        LSQ_ERROR("Failed to create ioctl socket: %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+#else
+    server_ctx.bnxt_ioctl_sock_fd = -1;
+#endif
 
     if (!server_ctx.document_root)
     {
@@ -2070,10 +2155,36 @@ main (int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+#ifdef HAVE_BNXT_EN_DRIVER
+    if (server_ctx.flush_offload_on_startup)
+    {
+        struct service_port *sport = TAILQ_FIRST(&server_ctx.sports);
+        if (sport && sport->if_name[0])
+        {
+            LSQ_NOTICE("Flushing all QUIC offload flows on %s before starting server",
+                       sport->if_name);
+            http_offload_flush_flows(server_ctx.bnxt_ioctl_sock_fd,
+                                     sport->if_name);
+        }
+        else
+        {
+            LSQ_WARN("Cannot flush: no interface name available. "
+                     "Ensure -s IP:PORT is specified and the interface can be resolved.");
+        }
+    }
+#endif
+
     LSQ_DEBUG("entering event loop");
 
     s = prog_run(&prog);
     prog_cleanup(&prog);
+
+#ifdef HAVE_BNXT_EN_DRIVER
+    if (server_ctx.bnxt_ioctl_sock_fd >= 0) {
+        close(server_ctx.bnxt_ioctl_sock_fd);
+        LSQ_INFO("Closed ioctl socket fd %d", server_ctx.bnxt_ioctl_sock_fd);
+    }
+#endif
 
 #if HAVE_REGEX
     if (!server_ctx.document_root)

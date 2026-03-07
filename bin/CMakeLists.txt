@@ -23,7 +23,11 @@ IF(MSVC)
     LIST(APPEND LIBS ${GETOPT_LIB})
 ENDIF()
 
-add_executable(http_server http_server.c prog.c test_common.c test_cert.c)
+SET(HTTP_SERVER_SOURCES http_server.c prog.c test_common.c test_cert.c)
+IF (BNXT_EN_INCLUDE_DIR)
+    LIST(APPEND HTTP_SERVER_SOURCES http_offload.c)
+ENDIF()
+add_executable(http_server ${HTTP_SERVER_SOURCES})
 IF(NOT MSVC)   #   TODO: port MD5 server and client to Windows
 add_executable(md5_server md5_server.c prog.c test_common.c test_cert.c)
 add_executable(md5_client md5_client.c prog.c test_common.c test_cert.c)
