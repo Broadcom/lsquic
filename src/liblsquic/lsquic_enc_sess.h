@@ -317,6 +317,10 @@ struct enc_session_funcs_iquic
     int
     (*esfi_data_in)(enc_session_t *, enum enc_level,
                                             const unsigned char *, size_t);
+
+    int
+    (*esfi_get_offload_crypto_info)(enc_session_t *,
+                                    struct lsquic_offload_crypto_info *, int);
 };
 
 LSQUIC_EXTERN

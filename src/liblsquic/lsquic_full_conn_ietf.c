@@ -9140,6 +9140,14 @@ ietf_full_conn_ci_get_param (lsquic_conn_t *lconn, enum lsquic_conn_param param,
 }
 
 
+static lsquic_packno_t
+ietf_full_conn_ci_get_last_sent_packno (lsquic_conn_t *lconn)
+{
+    struct ietf_full_conn *conn = (struct ietf_full_conn *) lconn;
+    return conn->ifc_send_ctl.sc_senhist.sh_last_sent;
+}
+
+
 #if LSQUIC_CONN_STATS
 static const struct conn_stats *
 ietf_full_conn_ci_get_stats (struct lsquic_conn *lconn)
@@ -9240,6 +9248,7 @@ static const struct conn_iface ietf_full_conn_iface = {
     .ci_get_info            =  ietf_full_conn_ci_get_info,
     .ci_set_param           =  ietf_full_conn_ci_set_param,
     .ci_get_param           =  ietf_full_conn_ci_get_param,
+    .ci_get_last_sent_packno=  ietf_full_conn_ci_get_last_sent_packno,
 #if LSQUIC_CONN_STATS
     .ci_get_stats           =  ietf_full_conn_ci_get_stats,
     .ci_log_stats           =  ietf_full_conn_ci_log_stats,
@@ -9253,6 +9262,7 @@ static const struct conn_iface ietf_full_conn_prehsk_iface = {
     .ci_next_packet_to_send =  ietf_full_conn_ci_next_packet_to_send_pre_hsk,
     .ci_packet_not_sent     =  ietf_full_conn_ci_packet_not_sent_pre_hsk,
     .ci_packet_sent         =  ietf_full_conn_ci_packet_sent_pre_hsk,
+    .ci_get_last_sent_packno=  ietf_full_conn_ci_get_last_sent_packno,
 #if LSQUIC_CONN_STATS
     .ci_get_stats           =  ietf_full_conn_ci_get_stats,
     .ci_log_stats           =  ietf_full_conn_ci_log_stats,

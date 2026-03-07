@@ -39,6 +39,9 @@ typedef struct ALIGNED_(8) lsquic_cid
 /** Stream ID */
 typedef uint64_t lsquic_stream_id_t;
 
+/** Packet number */
+typedef uint64_t lsquic_packno_t;
+
 /** LSQUIC engine */
 typedef struct lsquic_engine lsquic_engine_t;
 

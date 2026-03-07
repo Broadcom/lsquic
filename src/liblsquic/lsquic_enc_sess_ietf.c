@@ -121,6 +121,8 @@ struct header_prot
         HP_CAN_READ  = 1 << 0,
         HP_CAN_WRITE = 1 << 1,
     }                   hp_flags;
+    unsigned char       hp_key[2][EVP_MAX_KEY_LENGTH];  /* For storing raw HP key */
+    uint8_t             hp_key_len;                     /* Length of the HP key */
     union {
         EVP_CIPHER_CTX      cipher_ctx[2];                  /* AES */
         unsigned char       buf[2][CHACHA20_KEY_LENGTH];    /* ChaCha */
@@ -2835,6 +2837,11 @@ static void iquic_esfi_shake_stream (enc_session_t *sess,
                             struct lsquic_stream *stream, const char *what);
 
 
+static int
+iquic_esf_get_offload_crypto_info(enc_session_t *sess,
+                      struct lsquic_offload_crypto_info *info,
+                      int key_phase);
+
 const struct enc_session_funcs_iquic lsquic_enc_session_iquic_ietf_v1 =
 {
     .esfi_create_client  = iquic_esfi_create_client,
@@ -2851,6 +2858,8 @@ const struct enc_session_funcs_iquic lsquic_enc_session_iquic_ietf_v1 =
                          = iquic_esfi_handshake_confirmed,
     .esfi_in_init        = iquic_esfi_in_init,
     .esfi_data_in        = iquic_esfi_data_in,
+    .esfi_get_offload_crypto_info
+                         = iquic_esf_get_offload_crypto_info,
 };
 
 
@@ -2907,6 +2916,9 @@ cache_info (struct enc_sess_iquic *enc_sess)
 static void
 drop_SSL (struct enc_sess_iquic *enc_sess)
 {
+    if (enc_sess->esi_enpub->enp_stream_if->on_handshake_done_and_keys_dropped)
+	    enc_sess->esi_enpub->enp_stream_if->on_handshake_done_and_keys_dropped(enc_sess->esi_conn);
+
     LSQ_DEBUG("drop SSL object");
     if (enc_sess->esi_conn->cn_if->ci_drop_crypto_streams)
         enc_sess->esi_conn->cn_if->ci_drop_crypto_streams(
@@ -2977,7 +2989,6 @@ set_secret (SSL *ssl, enum ssl_encryption_level_t level,
     unsigned alpn_len;
     size_t key_len;
     const enum enc_level enc_level = (enum enc_level) level;
-    unsigned char key[EVP_MAX_KEY_LENGTH];
     char errbuf[ERR_ERROR_STRING_BUF_LEN];
 #define hexbuf errbuf
     struct label_set *labels;
@@ -3063,10 +3074,11 @@ set_secret (SSL *ssl, enum ssl_encryption_level_t level,
     key_len = EVP_AEAD_key_length(crypa.aead);
     if (hp->hp_gen_mask == gen_hp_mask_aes)
     {
+        hp->hp_key_len = key_len;
         lsquic_qhkdf_expand(crypa.md, secret, secret_len, labels->hp,
-                            labels->hp_len, key, key_len);
+                            labels->hp_len, hp->hp_key[rw], hp->hp_key_len);
         EVP_CIPHER_CTX_init(&hp->hp_u.cipher_ctx[rw]);
-        if (!EVP_EncryptInit_ex(&hp->hp_u.cipher_ctx[rw], crypa.hp, NULL, key, 0))
+        if (!EVP_EncryptInit_ex(&hp->hp_u.cipher_ctx[rw], crypa.hp, NULL, hp->hp_key[rw], 0))
         {
             LSQ_ERROR("cannot initialize cipher on level %u", enc_level);
             goto err;
@@ -3081,7 +3093,7 @@ set_secret (SSL *ssl, enum ssl_encryption_level_t level,
     {
         log_crypto_ctx(enc_sess, &pair->ykp_ctx[rw], "new", rw);
         LSQ_DEBUG("%s hp: %s", rw2str[rw],
-            HEXSTR(hp->hp_gen_mask == gen_hp_mask_aes ? key : hp->hp_u.buf[rw],
+            HEXSTR(hp->hp_gen_mask == gen_hp_mask_aes ? hp->hp_key[rw] : hp->hp_u.buf[rw],
             key_len, hexbuf));
     }
 
@@ -3616,4 +3628,58 @@ lsquic_ssl_sess_to_resume_info (SSL *ssl, SSL_SESSION *session,
         lsquic_alarmset_unset(enc_sess->esi_alset, AL_SESS_TICKET);
     }
     return status;
+}
+
+
+static int
+iquic_esf_get_offload_crypto_info(enc_session_t *sess,
+                                 struct lsquic_offload_crypto_info *info,
+                                 int key_phase)
+{
+    struct enc_sess_iquic *const enc_sess = (struct enc_sess_iquic *) sess;
+    const SSL_CIPHER *cipher;
+
+    if (!enc_sess || !info)
+        return -1;
+
+    cipher = SSL_get_current_cipher(enc_sess->esi_ssl);
+    if (!cipher)
+    {
+        LSQ_WARN("cannot get current cipher");
+        return -1;
+    }
+
+    info->cipher = SSL_CIPHER_get_protocol_id(cipher);
+    info->key_len = EVP_CIPHER_key_length(EVP_get_cipherbynid(SSL_CIPHER_get_cipher_nid(cipher)));
+
+    /*
+     * The `esi_pairs` array supports 1-RTT key rotation. `esi_pairs[0]` holds
+     * the initial keys (key phase 0), and `esi_pairs[1]` is used for the
+     * updated keys (key phase 1). The `key_phase` parameter is used to select
+     * which set of keys to retrieve, allowing the caller to get either the
+     * initial keys (by passing 0) or the updated keys after a key rotation
+     * event (by passing 1).
+     */
+    if (enc_sess->esi_flags & ESI_SERVER)
+    {
+        memcpy(info->tx_data_key, enc_sess->esi_pairs[key_phase].ykp_ctx[1].yk_key_buf, info->key_len);
+        memcpy(info->tx_iv, enc_sess->esi_pairs[key_phase].ykp_ctx[1].yk_iv_buf, LSQUIC_OFFLOAD_IV_LEN);
+        memcpy(info->tx_hdr_key, enc_sess->esi_hp.hp_key[1], enc_sess->esi_hp.hp_key_len);
+
+        memcpy(info->rx_data_key, enc_sess->esi_pairs[key_phase].ykp_ctx[0].yk_key_buf, info->key_len);
+        memcpy(info->rx_iv, enc_sess->esi_pairs[key_phase].ykp_ctx[0].yk_iv_buf, LSQUIC_OFFLOAD_IV_LEN);
+        memcpy(info->rx_hdr_key, enc_sess->esi_hp.hp_key[0], enc_sess->esi_hp.hp_key_len);
+    }
+    else
+    {
+        memcpy(info->tx_data_key, enc_sess->esi_pairs[key_phase].ykp_ctx[0].yk_key_buf, info->key_len);
+        memcpy(info->tx_iv, enc_sess->esi_pairs[key_phase].ykp_ctx[0].yk_iv_buf, LSQUIC_OFFLOAD_IV_LEN);
+        memcpy(info->tx_hdr_key, enc_sess->esi_hp.hp_key[0], enc_sess->esi_hp.hp_key_len);
+
+        memcpy(info->rx_data_key, enc_sess->esi_pairs[key_phase].ykp_ctx[1].yk_key_buf, info->key_len);
+        memcpy(info->rx_iv, enc_sess->esi_pairs[key_phase].ykp_ctx[1].yk_iv_buf, LSQUIC_OFFLOAD_IV_LEN);
+        memcpy(info->rx_hdr_key, enc_sess->esi_hp.hp_key[1], enc_sess->esi_hp.hp_key_len);
+    }
+
+    return 0;
 }

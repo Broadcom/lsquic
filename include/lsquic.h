@@ -106,6 +106,57 @@ enum lsquic_version
     LSQVER_VERNEG
 };
 
+#define LSQUIC_MAX_OFFLOAD_KEY_LEN 32   /* Max size of crypto key in bytes.
+                                         * Accommodates 256-bit keys for ciphers
+                                         * such as AES-256-GCM and
+                                         * ChaCha20-Poly1305.
+                                         */
+#define LSQUIC_OFFLOAD_IV_LEN 12        /* Size of Initialization Vector in bytes.
+                                         * Matches 96-bit IVs for AES-GCM in
+                                         * QUIC/TLS 1.3.
+                                         */
+
+struct lsquic_offload_crypto_info {
+    uint16_t cipher;                                 /* Negotiated IETF QUIC cipher suite */
+    uint8_t tx_data_key[LSQUIC_MAX_OFFLOAD_KEY_LEN]; /* 1-RTT traffic key for transmit */
+    uint8_t tx_hdr_key[LSQUIC_MAX_OFFLOAD_KEY_LEN];  /* 1-RTT header protection key for transmit */
+    uint8_t tx_iv[LSQUIC_OFFLOAD_IV_LEN];            /* Initialization Vector for transmit */
+    uint8_t rx_data_key[LSQUIC_MAX_OFFLOAD_KEY_LEN]; /* 1-RTT traffic key for receive */
+    uint8_t rx_hdr_key[LSQUIC_MAX_OFFLOAD_KEY_LEN];  /* 1-RTT header protection key for receive */
+    uint8_t rx_iv[LSQUIC_OFFLOAD_IV_LEN];            /* Initialization Vector for receive */
+    uint8_t key_len;                                 /* Length of tx_data_key and rx_data_key */
+};
+
+/**
+ *  Retrieves IETF QUIC 1-RTT crypto material for hardware offload.
+ *  Returns 0 on success, -1 if handshake not complete or not IETF QUIC.
+ */
+int lsquic_conn_get_offload_crypto_info(lsquic_conn_t *conn,
+                                        struct lsquic_offload_crypto_info *info,
+                                        int key_phase);
+
+enum lsquic_offload_direction {
+    LSQUIC_OFFLOAD_NONE = 0,
+    LSQUIC_OFFLOAD_TX = 1,  /* Offload 1-RTT TX */
+    LSQUIC_OFFLOAD_RX = 2,  /* Offload 1-RTT RX */
+    LSQUIC_OFFLOAD_ALL = 3, /* Offload 1-RTT TX and RX */
+};
+
+/**
+ *  Sets the hardware offload status for 'conn' to 'direction'.
+ *  There are no hardware-assigned Key IDs passed back to lsquic in this model.
+ *  Returns 0 on success, -1 on failure.
+ */
+int lsquic_conn_set_offload_status(lsquic_conn_t *conn,
+                                   enum lsquic_offload_direction direction);
+
+/**
+ *  Gets the hardware offload status for 'conn'.
+ *  Returns the offload status, or LSQUIC_OFFLOAD_NONE if not offloaded.
+ */
+enum lsquic_offload_direction
+lsquic_conn_get_offload_status(lsquic_conn_t *conn);
+
 /**
  * We currently support versions 43, 46, 50, Draft-27, Draft-29,
  * and IETF QUIC v1.
@@ -216,6 +267,11 @@ struct lsquic_stream_if {
      * Note: this callback will be deprecated when gQUIC support is removed.
      */
     void (*on_sess_resume_info)(lsquic_conn_t *c, const unsigned char *, size_t);
+    /**
+     * Optional callback is called after handshake is successfully completed
+     * and handshake keys have been dropped.
+     */
+    void (*on_handshake_done_and_keys_dropped)(lsquic_conn_t *c);
     /**
      * Optional callback is called as soon as the peer resets a stream.
      * The argument `how' is either 0, 1, or 2, meaning "read", "write", and
@@ -2334,6 +2390,12 @@ lsquic_ssl_to_conn (const struct ssl_st *);
 int
 lsquic_ssl_sess_to_resume_info (struct ssl_st *, struct ssl_session_st *,
                                         unsigned char **buf, size_t *buf_sz);
+
+/**
+ * Get the last sent packet number.
+ */
+lsquic_packno_t
+lsquic_conn_get_last_sent_packno (lsquic_conn_t *);
 
 #ifdef __cplusplus
 }

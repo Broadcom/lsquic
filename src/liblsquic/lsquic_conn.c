@@ -370,3 +370,68 @@ lsquic_conn_get_param (lsquic_conn_t *lconn, enum lsquic_conn_param param,
     return -1;
 }
 
+
+lsquic_packno_t
+lsquic_conn_get_last_sent_packno (lsquic_conn_t *lconn)
+{
+    if (!lconn)
+        return -1;
+    if (lconn->cn_if && lconn->cn_if->ci_get_last_sent_packno)
+        return lconn->cn_if->ci_get_last_sent_packno(lconn);
+    return -1;
+}
+
+
+int
+lsquic_conn_get_offload_crypto_info(lsquic_conn_t *lconn,
+                                    struct lsquic_offload_crypto_info *info,
+                                    int key_phase)
+{
+    if (lconn->cn_flags & LSCONN_IETF)
+        return lconn->cn_esf.i->esfi_get_offload_crypto_info(lconn->cn_enc_session,
+                                                             info, key_phase);
+    else
+        return -1;
+}
+
+int
+lsquic_conn_set_offload_status (lsquic_conn_t *conn,
+                                enum lsquic_offload_direction direction)
+{
+    if (!(conn->cn_flags & LSCONN_HANDSHAKE_DONE) || !(conn->cn_flags & LSCONN_IETF))
+    {
+        LSQ_WARN("cannot set offload status: handshake not done or not IETF QUIC");
+        return -1;
+    }
+
+    conn->cn_flags &= ~(LSCONN_HW_OFFLOADED_TX | LSCONN_HW_OFFLOADED_RX);
+
+    if (direction & LSQUIC_OFFLOAD_TX)
+        conn->cn_flags |= LSCONN_HW_OFFLOADED_TX;
+    if (direction & LSQUIC_OFFLOAD_RX)
+        conn->cn_flags |= LSCONN_HW_OFFLOADED_RX;
+
+    LSQ_INFOC("connection %"CID_FMT" offload status set to %d (TX: %d, RX: %d)",
+              CID_BITS(&conn->cn_logid), direction,
+              !!(conn->cn_flags & LSCONN_HW_OFFLOADED_TX),
+              !!(conn->cn_flags & LSCONN_HW_OFFLOADED_RX));
+
+    return 0;
+}
+
+enum lsquic_offload_direction
+lsquic_conn_get_offload_status (lsquic_conn_t *conn)
+{
+    enum lsquic_offload_direction dir = LSQUIC_OFFLOAD_NONE;
+
+    if (!conn)
+        return LSQUIC_OFFLOAD_NONE;
+
+    if (conn->cn_flags & LSCONN_HW_OFFLOADED_TX)
+        dir |= LSQUIC_OFFLOAD_TX;
+    if (conn->cn_flags & LSCONN_HW_OFFLOADED_RX)
+        dir |= LSQUIC_OFFLOAD_RX;
+
+    return dir;
+}
+

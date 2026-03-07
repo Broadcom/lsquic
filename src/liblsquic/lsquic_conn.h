@@ -62,6 +62,8 @@ enum lsquic_conn_flags {
     LSCONN_RETRY_CONN     = (1 <<24),   /* This is a retry connection */
     LSCONN_VER_UPDATED    = (1 <<25),
     LSCONN_NO_BL          = (1 <<26),
+    LSCONN_HW_OFFLOADED_TX = (1 << 27), /* 1-RTT TX offload active for this connection */
+    LSCONN_HW_OFFLOADED_RX = (1 << 28), /* 1-RTT RX offload active for this connection */
 };
 
 /* A connection may have things to send and be closed at the same time.
@@ -307,12 +309,16 @@ struct conn_iface
     (*ci_get_param) (lsquic_conn_t *conn, enum lsquic_conn_param param,
                      void *value, size_t *value_len);
 
+    lsquic_packno_t
+    (*ci_get_last_sent_packno) (lsquic_conn_t *);
+
     /* Used by the stream module to report that one of the user streams has
      * been read from or written to.  This is what underpins the "no progress
      * timeout" mechanism: see @ref es_noprogress_timeout.
      */
     void
     (*ci_user_stream_progress) (struct lsquic_conn *);
+
 };
 
 #define LSCONN_CCE_BITS 3
