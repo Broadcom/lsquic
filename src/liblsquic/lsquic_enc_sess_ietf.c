@@ -1671,12 +1671,19 @@ get_crypto_params (const struct enc_sess_iquic *enc_sess,
         params->hp          = EVP_aes_256_ecb();
         params->gen_hp_mask = gen_hp_mask_aes;
         break;
+/*
+ * QUIC hardware offload does not support ChaCha20.  Guard behind
+ * SUPPORT_TLS_CHACHA20_POLY1305_SHA256 so that only AES-GCM suites
+ * are negotiated when hardware offload is the target.
+ */
+#ifdef SUPPORT_TLS_CHACHA20_POLY1305_SHA256
     case 0x03000000 | 0x1303:       /* TLS_CHACHA20_POLY1305_SHA256 */
         params->md          = EVP_sha256();
         params->aead        = EVP_aead_chacha20_poly1305();
         params->hp          = NULL;
         params->gen_hp_mask = gen_hp_mask_chacha20;
         break;
+#endif
     default:
         /* TLS_AES_128_CCM_SHA256 and TLS_AES_128_CCM_8_SHA256 are not
          * supported by BoringSSL (grep for \b0x130[45]\b).
@@ -2708,8 +2715,10 @@ iquic_esf_keysize (enc_session_t *enc_session_p)
             return 128 / 8;
         case 0x03000000 | 0x1302:       /* TLS_AES_256_GCM_SHA384 */
             return 256 / 8;
+#ifdef SUPPORT_TLS_CHACHA20_POLY1305_SHA256
         case 0x03000000 | 0x1303:       /* TLS_CHACHA20_POLY1305_SHA256 */
             return 256 / 8;
+#endif
         default:
             return -1;
         }
