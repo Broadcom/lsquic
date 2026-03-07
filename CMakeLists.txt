@@ -13,6 +13,7 @@ OPTION(LSQUIC_TESTS "Compile library unit tests" ON)
 OPTION(LSQUIC_SHARED_LIB "Compile as shared librarry" OFF)
 OPTION(LSQUIC_DEVEL "Compile in development mode" OFF)
 OPTION(LSQUIC_WEBTRANSPORT "Enable WebTransport support" OFF)
+SET(BNXT_EN_USRINCLUDE_DIR "" CACHE STRING "Path to bnxt_en/usrinclude directory")
 
 INCLUDE(GNUInstallDirs)
 INCLUDE(CheckSymbolExists)
@@ -306,6 +307,25 @@ ELSE()
     UNSET(CMAKE_EXE_LINKER_FLAGS)
     UNSET(CMAKE_REQUIRED_LIBRARIES)
 
+ENDIF()
+
+IF (NOT "${BNXT_EN_USRINCLUDE_DIR}" STREQUAL "" AND NOT "${BNXT_EN_USRINCLUDE_DIR}" STREQUAL "OFF")
+    MESSAGE(STATUS "BNXT_EN_USRINCLUDE_DIR is set to: ${BNXT_EN_USRINCLUDE_DIR}")
+    SET(BNXT_EN_INCLUDE_DIR ${BNXT_EN_USRINCLUDE_DIR})
+ELSE()
+    FIND_PATH(BNXT_EN_INCLUDE_DIR NAMES linux/bnxt_quic_usr_include.h
+                PATHS
+                ${PROJECT_SOURCE_DIR}/../nxt-linux-drivers/v3/usrinclude
+                /usr/include
+                NO_DEFAULT_PATH)
+ENDIF()
+
+IF (BNXT_EN_INCLUDE_DIR)
+    MESSAGE(STATUS "BNXT_EN include directory found: ${BNXT_EN_INCLUDE_DIR}")
+    INCLUDE_DIRECTORIES(${BNXT_EN_INCLUDE_DIR})
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DHAVE_BNXT_EN_DRIVER")
+ELSE()
+    MESSAGE(WARNING "BNXT_EN include directory not found. QUIC offload features might not be available.")
 ENDIF()
 
 SET(CMAKE_INCLUDE_CURRENT_DIR ON)
