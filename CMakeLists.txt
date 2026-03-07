@@ -74,8 +74,8 @@ IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
     #SET (MY_CMAKE_FLAGS "${MY_CMAKE_FLAGS} -DLSQUIC_ENABLE_HANDSHAKE_DISABLE=1")
 ELSE()
     SET(MY_CMAKE_FLAGS "${MY_CMAKE_FLAGS} -O3 -g0")
-    # Comment out the following line to compile out debug messages:
-    #SET(MY_CMAKE_FLAGS "${MY_CMAKE_FLAGS} -DLSQUIC_LOWEST_LOG_LEVEL=LSQ_LOG_INFO")
+    # Comment out the following line to compile in debug messages:
+    SET(MY_CMAKE_FLAGS "${MY_CMAKE_FLAGS} -DLSQUIC_LOWEST_LOG_LEVEL=LSQ_LOG_INFO")
 ENDIF()
 
 IF (LSQUIC_DEVEL)
@@ -132,8 +132,8 @@ IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
     #SET(LIBS ${LIBS} fiu)
 ELSE()
     SET(MY_CMAKE_FLAGS "${MY_CMAKE_FLAGS} -Ox")
-    # Comment out the following line to compile out debug messages:
-    #SET(MY_CMAKE_FLAGS "${MY_CMAKE_FLAGS} -DLSQUIC_LOWEST_LOG_LEVEL=LSQ_LOG_INFO")
+    # Comment out the following line to compile in debug messages:
+    SET(MY_CMAKE_FLAGS "${MY_CMAKE_FLAGS} -DLSQUIC_LOWEST_LOG_LEVEL=LSQ_LOG_INFO")
 ENDIF()
 
 ENDIF() #MSVC
