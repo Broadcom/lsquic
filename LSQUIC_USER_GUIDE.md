@@ -48,10 +48,6 @@ This guide shows how to build and run lsquic with **Broadcom BNXT_EN driver with
 - ✅ **IETF QUIC only**: v1, v2, and Internet-Drafts
 - ❌ **Google QUIC**: Not supported (Q043, Q046, Q050 run in software only)
 
-**📖 For detailed QUIC offload API documentation, see:**
-- **[QUIC_OFFLOAD_USER_GUIDE.md](../nxt-linux-drivers/v3/quic/docs/QUIC_OFFLOAD_USER_GUIDE.md)** - Complete API reference, data structures, examples
-- **[QUIC_API.md](../nxt-linux-drivers/v3/quic/docs/QUIC_API.md)** - Focused API documentation
-
 ### Operating Modes
 
 This guide covers two modes:
@@ -150,7 +146,6 @@ The BNXT_EN driver package includes:
 - **User-space include files** (`usrinclude/linux/bnxt_quic_usr_include.h`)
 - **Documentation**:
   - BNXT_EN driver release notes
-  - [Broadcom NetXtreme QUIC Hardware Offload User Guide](../nxt-linux-drivers/v3/quic/docs/QUIC_OFFLOAD_USER_GUIDE.md)
   - Installation procedures
   - System requirements and dependencies
   - Firmware version requirements
@@ -185,14 +180,6 @@ For comprehensive information about the BNXT_EN driver and hardware capabilities
   - Operating system compatibility and limitations
   - Firmware update procedures
   
-**QUIC-Specific Offload Documentation**:
-- **[Broadcom NetXtreme QUIC Hardware Offload User Guide](../nxt-linux-drivers/v3/quic/docs/QUIC_OFFLOAD_USER_GUIDE.md)** - QUIC offload API documentation
-  - QUIC offload API reference and data structures
-  - Dual key support and key updates
-  - Complete C code examples
-  - Performance optimization techniques
-  - Security considerations
-
 **Note**: The online Broadcom TechDocs provides the most up-to-date information. Always consult the [official web documentation](https://techdocs.broadcom.com/us/en/storage-and-ethernet-connectivity/ethernet-nic-controllers/bcm957xxx/adapters.html) for the latest driver features, compatibility, and best practices.
 
 #### Next Steps
@@ -405,10 +392,6 @@ lsquic/bin/
 ├── http_server.c     # Uses offload via -O and -s IP:PORT
 └── http_client.c     # Client application
 ```
-
-For detailed API information and advanced offload usage, refer to [QUIC_OFFLOAD_USER_GUIDE.md](../nxt-linux-drivers/v3/quic/docs/QUIC_OFFLOAD_USER_GUIDE.md).
-
----
 
 ## Building BNXT_EN Driver
 
@@ -1323,10 +1306,6 @@ dmesg -w | grep -i quic
 # - "CRYPTO_CMD failed" (hardware issue)
 ```
 
-**For complete troubleshooting guide**, see:
-- [QUIC_OFFLOAD_USER_GUIDE.md - Troubleshooting](../nxt-linux-drivers/v3/quic/docs/QUIC_OFFLOAD_USER_GUIDE.md#troubleshooting)
-- [QUIC_API.md - Error Codes](../nxt-linux-drivers/v3/quic/docs/QUIC_API.md#error-codes)
-
 ### Issue 4: Client Cannot Connect
 
 **Symptoms**:
@@ -1532,13 +1511,8 @@ The current LSQUIC integration with QUIC hardware offload has the following know
         ├── bnxt_en.ko
         ├── bnxt_quic.c
         ├── usrinclude/
-        │   └── linux/
-        │       └── bnxt_quic_usr_include.h
-        └── quic/                        # QUIC offload documentation
-            └── docs/                    # Core documentation
-                ├── QUIC_API.md
-                ├── QUIC_OFFLOAD_USER_GUIDE.md
-                └── ...
+            └── linux/
+                └── bnxt_quic_usr_include.h
 ```
 
 ### C. Environment Variables
@@ -1613,17 +1587,6 @@ Before asking for help, verify:
   - Statistics and monitoring
   - Complete troubleshooting guide
   
-**QUIC Hardware Offload Documentation**:
-- **[QUIC_OFFLOAD_USER_GUIDE.md](../nxt-linux-drivers/v3/quic/docs/QUIC_OFFLOAD_USER_GUIDE.md)** - QUIC offload API guide
-  - API reference and data structures
-  - Dual key support and key updates
-  - Complete C code examples
-  - Troubleshooting QUIC offload issues
-- **[QUIC_API.md](../nxt-linux-drivers/v3/quic/docs/QUIC_API.md)** - Focused API documentation
-  - ioctl commands reference
-  - Error codes
-  - Quick examples
-
 **Note**: Always consult the [official Broadcom TechDocs website](https://techdocs.broadcom.com/us/en/storage-and-ethernet-connectivity/ethernet-nic-controllers/bcm957xxx/adapters.html) for the most up-to-date driver documentation, compatibility information, and best practices.
 
 ### F. Revision History
